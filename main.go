@@ -66,18 +66,15 @@ func main() {
 
 	router := gin.Default()
 
-	// 載入 HTML 模板
-	router.LoadHTMLGlob("static/*")
-
 	// --------------------------------------------------------
 	// 靜態文件服務
 	//    設定靜態文件目錄，訪問 http://localhost:8080/static/xxx
 	// --------------------------------------------------------
 	router.Static("/static", "./static")
 
-	// 設定首頁為靜態 HTML
+	// 設定首頁為靜態 HTML (改用 c.File 避免與 Vue 的 {{}} 語法衝突)
 	router.GET("/", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "index.html", nil)
+		c.File("./static/index.html")
 	})
 
 	// --------------------------------------------------------
@@ -101,53 +98,61 @@ func main() {
 	})
 
 	// --------------------------------------------------------
-	// 範例 3: GET 請求 + Redis + MSSQL 連線測試
-	//    展示如何在 API 中使用資料庫
+	// 範例 3: GET 請求 - 健康檢查 API
+	//    展示如何檢查 Redis 與 MSSQL 連線狀態
+	//    回應格式: JSON
 	// --------------------------------------------------------
 	router.GET("/healthcheck", func(c *gin.Context) {
-		// ---- Redis 連線範例 ----
+		ctx := context.Background()
+		result := gin.H{
+			"status": "healthy",
+			"redis":  "unknown",
+			"mssql":  "unknown",
+		}
+		statusCode := http.StatusOK
+
+		// ---- 檢查 Redis 連線 ----
 		rdb := redis.NewClient(&redis.Options{
 			Addr:     "redis-cluster.h1-redis-dev:6379",
-			Password: "h1devredis1688", // no password set
-			DB:       0,                // use default DB
+			Password: "h1devredis1688",
+			DB:       0,
 		})
 
-		ctx := context.Background()
-
-		val, err := rdb.Ping(ctx).Result()
+		_, err := rdb.Ping(ctx).Result()
 		if err != nil {
-			fmt.Println(err)
+			result["redis"] = "disconnected"
+			result["status"] = "unhealthy"
+			statusCode = http.StatusServiceUnavailable
+			log.Printf("Redis error: %v\n", err)
 		} else {
-			fmt.Println(val)
+			result["redis"] = "connected"
 		}
 
-		// ---- MSSQL 連線範例 ----
+		// ---- 檢查 MSSQL 連線 ----
 		connString := fmt.Sprintf("server=%s;user id=%s;password=%s;port=%d;database=%s;",
 			"daydb-svc.h1-db-dev", "mobile_api", "a:oY%~^E+VU0", 1433, "HKNetGame_HJ")
 
 		db, err := sql.Open("sqlserver", connString)
 		if err != nil {
-			log.Fatal("Open connection failed:", err.Error())
-		}
-		defer db.Close()
-
-		rows, err := db.Query("SELECT name, state_desc FROM sys.databases WHERE name = 'HKNetGame_HJ';")
-		if err != nil {
-			log.Fatal(err)
-			os.Exit(1)
-		}
-		defer rows.Close()
-
-		var name, state_desc string
-		for rows.Next() {
-			err := rows.Scan(&name, &state_desc)
+			result["mssql"] = "disconnected"
+			result["status"] = "unhealthy"
+			statusCode = http.StatusServiceUnavailable
+			log.Printf("MSSQL connection error: %v\n", err)
+		} else {
+			defer db.Close()
+			err = db.Ping()
 			if err != nil {
-				log.Fatal(err)
+				result["mssql"] = "disconnected"
+				result["status"] = "unhealthy"
+				statusCode = http.StatusServiceUnavailable
+				log.Printf("MSSQL ping error: %v\n", err)
+			} else {
+				result["mssql"] = "connected"
 			}
-			log.Printf("name: %s, state_desc: %s\n", name, state_desc)
 		}
-		str := fmt.Sprintf("val: %v, name: %s, state_desc: %s", val, name, state_desc)
-		c.String(http.StatusOK, str)
+
+		// ---- 回應 JSON ----
+		c.JSON(statusCode, result)
 	})
 
 	// --------------------------------------------------------
