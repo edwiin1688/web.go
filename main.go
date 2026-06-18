@@ -18,6 +18,8 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/joho/godotenv"
+
+	"github.com/chiisen/web.go/internal/redisclient"
 )
 
 // ============================================================
@@ -67,6 +69,8 @@ func main() {
 	redisAddr := getEnv("REDIS_ADDR", "redis-cluster.h1-redis-dev:6379")
 	redisPassword := getEnv("REDIS_PASSWORD", "")
 	redisDB := getEnvInt("REDIS_DB", 0)
+	redisPoolSize := getEnvInt("REDIS_POOL_SIZE", 10)
+	redisMinIdle := getEnvInt("REDIS_MIN_IDLE", 2)
 
 	mssqlServer := getEnv("MSSQL_SERVER", "daydb-svc.h1-db-dev")
 	mssqlPort := getEnvInt("MSSQL_PORT", 1433)
@@ -75,6 +79,19 @@ func main() {
 	mssqlDatabase := getEnv("MSSQL_DATABASE", "HKNetGame_HJ")
 
 	router := gin.Default()
+
+	// --------------------------------------------------------
+	// 初始化全域 Redis client（lazy, sync.Once 守護）。
+	// 之後所有 handler 都從 redisclient.Get() 取得同一個 client。
+	// 連線池由環境變數 REDIS_POOL_SIZE / REDIS_MIN_IDLE 控制。
+	// --------------------------------------------------------
+	redisclient.Init(&redis.Options{
+		Addr:         redisAddr,
+		Password:     redisPassword,
+		DB:           redisDB,
+		PoolSize:     redisPoolSize,
+		MinIdleConns: redisMinIdle,
+	})
 
 	// --------------------------------------------------------
 	// 靜態文件服務
@@ -122,12 +139,9 @@ func main() {
 		statusCode := http.StatusOK
 
 		// ---- 檢查 Redis 連線 ----
-		rdb := redis.NewClient(&redis.Options{
-			Addr:     redisAddr,
-			Password: redisPassword,
-			DB:       redisDB,
-		})
-
+		// 使用全域 lazy-init client，連線交由 redisclient.Close() 在
+		// graceful shutdown 階段統一釋放，不再每個 request 建立 / 關閉。
+		rdb := redisclient.Get()
 		_, err := rdb.Ping(ctx).Result()
 		if err != nil {
 			result["redis"] = "disconnected"
@@ -137,7 +151,6 @@ func main() {
 		} else {
 			result["redis"] = "connected"
 		}
-		defer rdb.Close()
 
 		// ---- 檢查 MSSQL 連線 ----
 		connString := fmt.Sprintf("server=%s;user id=%s;password=%s;port=%d;database=%s;",
@@ -203,5 +216,11 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatal("Server Shutdown:", err)
 	}
+
+	// 釋放 Redis 連線池（在 http server 關閉後，避免 in-flight request 失敗）
+	if err := redisclient.Close(); err != nil {
+		log.Printf("Redis client close error: %v\n", err)
+	}
+
 	log.Println("Server exiting")
 }
