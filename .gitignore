@@ -8,6 +8,9 @@
 *.so
 *.dylib
 
+# 專案編譯出的執行檔 (因專案資料夾名為 web.go，在非 Windows 系統編譯時預設會產生此同名二進位檔)
+/web.go
+
 # Test binary, built with `go test -c`
 *.test
 
@@ -19,9 +22,26 @@
 
 # Go workspace file
 go.work
+go.work.sum
+
+# IDEs and editors
 /.idea
-/folderico-green.ico
+/.vscode/
+
+# OS templates
 /desktop.ini
+/folderico-green.ico
+Thumbs.db
+.DS_Store
+
+# Python environment
+.python-version
+.venv/
+venv/
+env/
 
 # 環境變數檔（真實密碼不應提交，請用 .env.example 作為模板）
 /.env
+
+# AI Agent Task State
+/.agent_task_state.md
