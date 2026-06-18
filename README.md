@@ -26,6 +26,35 @@ go mod init github.com/chiisen/web.go
 *💡 最佳實踐：在實際開發中，強烈建議使用 `[程式碼代管平台]/[你的帳號]/[專案名稱]` 的格式來命名，這符合 Go 社群的標準規範。*
 
 # 執行
+
+## 1. 設定環境變數
+
+複製 `.env.example` 為 `.env`，填入實際連線資訊：
+
+```
+cp .env.example .env
+```
+
+`.env` 已加入 `.gitignore`，不會被提交到版本控制。
+
+可用環境變數：
+
+| 變數 | 說明 | 預設值 |
+|------|------|--------|
+| `SERVER_ADDR` | HTTP 監聽位址 | `:8080` |
+| `REDIS_ADDR` | Redis 位址 | `redis-cluster.h1-redis-dev:6379` |
+| `REDIS_PASSWORD` | Redis 密碼 | （空字串） |
+| `REDIS_DB` | Redis DB index | `0` |
+| `MSSQL_SERVER` | MSSQL 主機 | `daydb-svc.h1-db-dev` |
+| `MSSQL_PORT` | MSSQL 埠 | `1433` |
+| `MSSQL_USER` | MSSQL 帳號 | `mobile_api` |
+| `MSSQL_PASSWORD` | MSSQL 密碼 | （空字串） |
+| `MSSQL_DATABASE` | MSSQL 資料庫 | `HKNetGame_HJ` |
+
+> 💡 若 `.env` 不存在，會直接使用系統環境變數；若系統環境變數也沒設，則用上表的預設值。
+
+## 2. 啟動服務
+
 ```
 go run main.go
 ```

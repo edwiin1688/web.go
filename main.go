@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,53 +17,62 @@ import (
 	_ "github.com/denisenkom/go-mssqldb"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/joho/godotenv"
 )
 
 // ============================================================
-// Gin API 開發教學
+// 配置：從環境變數讀取，支援 .env 檔
 // ============================================================
 //
-// 1. 建立 Router
-//    router := gin.Default()  // 建立預設路由器（包含 Logger 和 Recovery 中間件）
+// 啟動時會自動載入同目錄下的 .env（若存在）。
+// 所有變數都帶有 fallback，若未設定則使用預設值，
+// 方便本地開發直接 `go run main.go`，也方便部署時覆寫。
 //
-// 2. 定義路由
-//    router.METHOD("/path", handler)
-//
-//    METHOD 可用:
-//    - GET    : 取得資源
-//    - POST   : 新增資源
-//    - PUT    : 更新資源（完整）
-//    - PATCH  : 更新資源（部分）
-//    - DELETE : 刪除資源
-//
-// 3. Handler 函數參數
-//    func(c *gin.Context)
-//    - c: Gin 上下文物件，包含請求與回應資訊
-//
-// 4. 常用回應方法
-//    c.String(http.StatusOK, "訊息")           // 回傳文字
-//    c.JSON(http.StatusOK, gin.H{"key": "value"}) // 回傳 JSON
-//    c.XML(http.StatusOK, gin.H{"key": "value"})  // 回傳 XML
-//    c.HTML(htmlTemplate, "data")              // 回傳 HTML
-//
-// 5. 取得請求參數
-//    c.Query("name")           // GET 參數 ?name=xxx
-//    c.PostForm("name")        // POST 表單參數
-//    c.Param("id")             // URL 參數 /user/:id
-//    c.ShouldBindJSON(&obj)    // JSON Body 綁定
-//
-// 6. 回應狀態碼
-//    http.StatusOK         = 200
-//    http.StatusCreated    = 201
-//    http.StatusBadRequest = 400
-//    http.StatusUnauthorized = 401
-//    http.StatusForbidden  = 403
-//    http.StatusNotFound   = 404
-//    http.StatusInternalServerError = 500
+// 完整環境變數清單見 .env.example。
 //
 // ============================================================
 
+// getEnv 取得環境變數，若未設定則回傳 fallback
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+// getEnvInt 取得整數型環境變數，轉換失敗時回傳 fallback
+func getEnvInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+		log.Printf("環境變數 %s=%s 不是合法整數，使用 fallback=%d\n", key, v, fallback)
+	}
+	return fallback
+}
+
 func main() {
+	// --------------------------------------------------------
+	// 載入 .env（若存在）。找不到檔案不報錯，方便正式環境直接吃系統環境變數。
+	// --------------------------------------------------------
+	if err := godotenv.Load(); err != nil {
+		log.Println("未找到 .env 檔，使用系統環境變數 / fallback 值")
+	} else {
+		log.Println("已載入 .env 檔")
+	}
+
+	// ---- 讀取設定 ----
+	serverAddr := getEnv("SERVER_ADDR", ":8080")
+
+	redisAddr := getEnv("REDIS_ADDR", "redis-cluster.h1-redis-dev:6379")
+	redisPassword := getEnv("REDIS_PASSWORD", "")
+	redisDB := getEnvInt("REDIS_DB", 0)
+
+	mssqlServer := getEnv("MSSQL_SERVER", "daydb-svc.h1-db-dev")
+	mssqlPort := getEnvInt("MSSQL_PORT", 1433)
+	mssqlUser := getEnv("MSSQL_USER", "mobile_api")
+	mssqlPassword := getEnv("MSSQL_PASSWORD", "")
+	mssqlDatabase := getEnv("MSSQL_DATABASE", "HKNetGame_HJ")
 
 	router := gin.Default()
 
@@ -113,9 +123,9 @@ func main() {
 
 		// ---- 檢查 Redis 連線 ----
 		rdb := redis.NewClient(&redis.Options{
-			Addr:     "redis-cluster.h1-redis-dev:6379",
-			Password: "h1devredis1688",
-			DB:       0,
+			Addr:     redisAddr,
+			Password: redisPassword,
+			DB:       redisDB,
 		})
 
 		_, err := rdb.Ping(ctx).Result()
@@ -127,10 +137,11 @@ func main() {
 		} else {
 			result["redis"] = "connected"
 		}
+		defer rdb.Close()
 
 		// ---- 檢查 MSSQL 連線 ----
 		connString := fmt.Sprintf("server=%s;user id=%s;password=%s;port=%d;database=%s;",
-			"daydb-svc.h1-db-dev", "mobile_api", "a:oY%~^E+VU0", 1433, "HKNetGame_HJ")
+			mssqlServer, mssqlUser, mssqlPassword, mssqlPort, mssqlDatabase)
 
 		db, err := sql.Open("sqlserver", connString)
 		if err != nil {
@@ -168,9 +179,11 @@ func main() {
 	// }
 
 	srv := &http.Server{
-		Addr:    ":8080",
+		Addr:    serverAddr,
 		Handler: router,
 	}
+
+	log.Printf("Server listening on %s\n", serverAddr)
 
 	go func() {
 		// 服務連線

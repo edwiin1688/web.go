@@ -22,3 +22,6 @@ go.work
 /.idea
 /folderico-green.ico
 /desktop.ini
+
+# 環境變數檔（真實密碼不應提交，請用 .env.example 作為模板）
+/.env
